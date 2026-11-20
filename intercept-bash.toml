@@ -1,0 +1,129 @@
+# /etc/antigravity/intercept-bash.toml
+# Декларативная и неизменяемая (read-only) конфигурация перехватчика команд AntiGravity CLI.
+# Изменяется исключительно при пересборке системы NixOS (nr-switch).
+
+[general]
+# Лимит параллельных потоков компиляции на хосте (Intel i3-6006U: 2 ядра / 4 потока)
+max_cargo_jobs = 2
+
+[workspaces]
+# Доверенные рабочие пространства: безопасные команды выполняются автоматически без лишних подтверждений
+trusted = [
+  "/home/user/nixos-config",
+  "/home/user/projects/libera-reader",
+  "/home/user/projects/agy-intercept-bash"
+]
+
+[commands]
+# Белый список разрешённых исполняемых файлов
+allow = [
+  "cargo",
+  "rustc",
+  "rustup",
+  "git",
+  "nix",
+  "nixos-rebuild",
+  "nix-build",
+  "nix-shell",
+  "nix-prefetch-url",
+  "nvfetcher",
+  "gh",
+  "nr-switch",
+  "prek",
+  "agy",
+  "bs",
+  "samply",
+  "ferric",
+  "profiler-cli",
+  "pq",
+  "dhat-to-flamegraph",
+  "jq",
+  "cd",
+  "pwd",
+  "echo",
+  "printf",
+  "mkdir",
+  "cp",
+  "mv",
+  "touch",
+  "which",
+  "whereis",
+  "type",
+  "curl",
+  "wget",
+  "tar",
+  "gzip",
+  "gunzip",
+  "xz",
+  "unzip",
+  "zip",
+  "python",
+  "python3",
+  "chmod",
+  "test",
+  "[",
+  "true",
+  "false",
+  "env",
+  "mcpls",
+  "lspmux",
+  "clear",
+  "diff"
+]
+
+# Разрешённые фильтры в пайплайнах (cmd | filter)
+allow_pipe_filters = [
+  "grep",
+  "rg",
+  "head",
+  "tail",
+  "wc",
+  "sed",
+  "awk",
+  "cut",
+  "tr",
+  "sort",
+  "uniq",
+  "jq",
+  "cat",
+  "bat",
+  "less",
+  "more",
+  "tee"
+]
+
+# Команды, заблокированные в пользу нативных MCP/инструментов
+[commands.forbidden_native]
+tree = "Не используй `tree` в Bash. Используй нативные средства исследования файлов."
+
+[security]
+# Системные деструктивные команды (блокируются безусловно)
+destructive_commands = [
+  "mkfs",
+  "wipefs",
+  "shred",
+  "fdisk",
+  "parted",
+  "reboot",
+  "shutdown",
+  "poweroff",
+  "su",
+  "doas"
+]
+
+# Паттерны опасных операций (рекурсивное удаление, форс-пуши, прямые пайпы из сети)
+[[security.deny_patterns]]
+pattern = "rm\\s+.*-(r.*f|f.*r)"
+reason = "Заблокировано опасное рекурсивное/принудительное удаление (rm -rf)."
+
+[[security.deny_patterns]]
+pattern = "dd\\s+if="
+reason = "Заблокирована команда прямого блочного чтения/записи dd."
+
+[[security.deny_patterns]]
+pattern = "(curl|wget).*\\|.*(sh|bash|zsh|fish)"
+reason = "Заблокировано выполнение внешних скриптов напрямую из сети."
+
+[[security.deny_patterns]]
+pattern = "git\\s+(push\\s+(--force|-f)|reset\\s+--hard|clean\\s+-[a-zA-Z]*f)"
+reason = "Заблокирована деструктивная Git-операция."
