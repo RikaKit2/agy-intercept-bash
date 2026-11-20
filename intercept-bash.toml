@@ -9,9 +9,13 @@ max_cargo_jobs = 2
 [workspaces]
 # Доверенные рабочие пространства: безопасные команды выполняются автоматически без лишних подтверждений
 trusted = [
-  "/home/user/nixos-config",
-  "/home/user/projects/libera-reader",
-  "/home/user/projects/agy-intercept-bash"
+  "/home/user/nixos-config"
+]
+
+# Запрещённые для Bash рабочие пространства: вызовы run_command блокируются
+# Агент должен использовать исключительно нативные инструменты (read_file, edit_file, mcpls LSP, codebase-memory)
+forbidden_bash = [
+  "/home/user/projects/libera-reader"
 ]
 
 [commands]

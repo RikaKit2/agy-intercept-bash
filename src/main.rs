@@ -51,6 +51,8 @@ impl Default for GeneralConfig {
 struct WorkspacesConfig {
     #[serde(default)]
     trusted: Vec<String>,
+    #[serde(default)]
+    forbidden_bash: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -79,9 +81,35 @@ struct DenyPatternConfig {
 
 impl Config {
     fn load() -> Self {
-        const SYSTEM_CONFIG: &str = "/etc/antigravity/intercept-bash.toml";
-        const LOCAL_CONFIG: &str = "./intercept-bash.toml";
+        // 1. Explicit env var override
+        if let Ok(path) = std::env::var("AGY_INTERCEPT_CONFIG") {
+            if let Ok(content) = fs::read_to_string(&path) {
+                if let Ok(cfg) = toml::from_str::<Config>(&content) {
+                    return cfg;
+                }
+            }
+        }
 
+        // 2. User home configs (e.g. mkOutOfStoreSymlink from NixOS / Home Manager)
+        if let Ok(home) = std::env::var("HOME") {
+            let user_configs = [
+                format!("{home}/.config/antigravity/intercept-bash.toml"),
+                format!("{home}/.gemini/antigravity-cli/intercept-bash.toml"),
+            ];
+            for path_str in &user_configs {
+                let p = Path::new(path_str);
+                if p.exists() {
+                    if let Ok(content) = fs::read_to_string(p) {
+                        if let Ok(cfg) = toml::from_str::<Config>(&content) {
+                            return cfg;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. System-wide /etc config
+        const SYSTEM_CONFIG: &str = "/etc/antigravity/intercept-bash.toml";
         if Path::new(SYSTEM_CONFIG).exists() {
             if let Ok(content) = fs::read_to_string(SYSTEM_CONFIG) {
                 if let Ok(cfg) = toml::from_str::<Config>(&content) {
@@ -90,6 +118,8 @@ impl Config {
             }
         }
 
+        // 4. Local repo fallback
+        const LOCAL_CONFIG: &str = "./intercept-bash.toml";
         if Path::new(LOCAL_CONFIG).exists() {
             if let Ok(content) = fs::read_to_string(LOCAL_CONFIG) {
                 if let Ok(cfg) = toml::from_str::<Config>(&content) {
@@ -207,10 +237,8 @@ impl Config {
         Self {
             general: GeneralConfig { max_cargo_jobs: 2 },
             workspaces: WorkspacesConfig {
-                trusted: vec![
-                    "/home/user/nixos-config".to_string(),
-                    "/home/user/projects/libera-reader".to_string(),
-                ],
+                trusted: vec!["/home/user/nixos-config".to_string()],
+                forbidden_bash: vec!["/home/user/projects/libera-reader".to_string()],
             },
             commands: CommandsConfig {
                 allow,
@@ -954,9 +982,40 @@ fn handle_stdin(raw: &str, config: &Config) -> Decision {
         None => return Decision::Allow,
     };
 
-    let is_trusted_workspace = root
-        .get("cwd")
-        .and_then(Json::as_str)
+    let cwd_opt = root.get("cwd").and_then(Json::as_str);
+    let workspace_paths: Vec<&str> = root
+        .get("workspacePaths")
+        .map(|wp| match wp {
+            Json::Array(arr) => arr.iter().filter_map(Json::as_str).collect(),
+            _ => Vec::new(),
+        })
+        .unwrap_or_default();
+
+    let is_forbidden_workspace = cwd_opt
+        .map(|cwd| {
+            config
+                .workspaces
+                .forbidden_bash
+                .iter()
+                .any(|fb| cwd == fb || cwd.starts_with(&format!("{fb}/")))
+        })
+        .unwrap_or(false)
+        || workspace_paths.iter().any(|w| {
+            config
+                .workspaces
+                .forbidden_bash
+                .iter()
+                .any(|fb| *w == fb || w.starts_with(&format!("{fb}/")))
+        });
+
+    if is_forbidden_workspace {
+        let target = cwd_opt.unwrap_or_else(|| workspace_paths.first().copied().unwrap_or(""));
+        return Decision::Deny(format!(
+            "В рабочей директории `{target}` запрещено выполнение Bash-команд. Используй нативные инструменты: чтение/редактирование файлов (read_file/edit_file), LSP (mcpls) и MCP-серверы."
+        ));
+    }
+
+    let is_trusted_workspace = cwd_opt
         .map(|cwd| {
             config
                 .workspaces
@@ -965,19 +1024,13 @@ fn handle_stdin(raw: &str, config: &Config) -> Decision {
                 .any(|t| cwd == t || cwd.starts_with(&format!("{t}/")))
         })
         .unwrap_or(false)
-        || root
-            .get("workspacePaths")
-            .map(|wp| match wp {
-                Json::Array(arr) => arr.iter().filter_map(Json::as_str).any(|w| {
-                    config
-                        .workspaces
-                        .trusted
-                        .iter()
-                        .any(|t| w == t || w.starts_with(&format!("{t}/")))
-                }),
-                _ => false,
-            })
-            .unwrap_or(false);
+        || workspace_paths.iter().any(|w| {
+            config
+                .workspaces
+                .trusted
+                .iter()
+                .any(|t| *w == t || w.starts_with(&format!("{t}/")))
+        });
 
     let decision = evaluate_command(cmd, 0, config);
     if is_trusted_workspace {
@@ -1082,6 +1135,16 @@ mod tests {
         let cfg = test_config();
         let payload = r#"{"cwd":"/home/user/nixos-config","toolCall":{"name":"run_command","args":{"CommandLine":"mutool info book.pdf"}}}"#;
         assert_eq!(handle_stdin(payload, &cfg), Decision::Allow);
+    }
+
+    #[test]
+    fn denies_bash_in_forbidden_workspaces() {
+        let cfg = test_config();
+        let payload = r#"{"cwd":"/home/user/projects/libera-reader","toolCall":{"name":"run_command","args":{"CommandLine":"cargo check"}}}"#;
+        assert!(matches!(handle_stdin(payload, &cfg), Decision::Deny(_)));
+
+        let payload_sub = r#"{"cwd":"/home/user/projects/libera-reader/src/ui","toolCall":{"name":"run_command","args":{"CommandLine":"git status"}}}"#;
+        assert!(matches!(handle_stdin(payload_sub, &cfg), Decision::Deny(_)));
     }
 
     #[test]
