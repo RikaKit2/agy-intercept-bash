@@ -14,9 +14,8 @@ trusted = [
 
 # Запрещённые для Bash рабочие пространства: вызовы run_command блокируются
 # Агент должен использовать исключительно нативные инструменты (read_file, edit_file, mcpls LSP, codebase-memory)
-forbidden_bash = [
-  "/home/user/projects/libera-reader"
-]
+# Сюда можно добавлять проекты с полным запретом Bash
+forbidden_bash = []
 
 [commands]
 # Белый список разрешённых исполняемых файлов
@@ -34,6 +33,7 @@ allow = [
   "gh",
   "nr-switch",
   "prek",
+  "rust-scaffold",
   "agy",
   "bs",
   "samply",
@@ -68,11 +68,20 @@ allow = [
   "[",
   "true",
   "false",
-  "env",
   "mcpls",
   "lspmux",
   "clear",
-  "diff"
+  "diff",
+  "ls",
+  "tree",
+  "fd",
+  "rg",
+  "grep",
+  "head",
+  "tail",
+  "wc",
+  "stat",
+  "file"
 ]
 
 # Разрешённые фильтры в пайплайнах (cmd | filter)
@@ -96,9 +105,10 @@ allow_pipe_filters = [
   "tee"
 ]
 
-# Команды, заблокированные в пользу нативных MCP/инструментов
+# Команды, заблокированные в пользу нативных инструментов agy-cli
+# (ls/fd/rg/grep/tree разрешены, т.к. list_dir/find_by_name/grep_search в agy-cli отсутствуют)
 [commands.forbidden_native]
-tree = "Не используй `tree` в Bash. Используй нативные средства исследования файлов."
+cat = "Не используй `cat` в Bash для чтения файлов. Используй нативный инструмент `read_file`."
 
 [security]
 # Системные деструктивные команды (блокируются безусловно)
@@ -125,9 +135,29 @@ pattern = "dd\\s+if="
 reason = "Заблокирована команда прямого блочного чтения/записи dd."
 
 [[security.deny_patterns]]
-pattern = "(curl|wget).*\\|.*(sh|bash|zsh|fish)"
+pattern = "(curl|wget).*\\|.*(sh|bash|zsh|fish|dash|python3?)"
 reason = "Заблокировано выполнение внешних скриптов напрямую из сети."
+
+[[security.deny_patterns]]
+pattern = "(sh|bash|zsh|fish|source)\\s+<\\(\\s*(curl|wget)"
+reason = "Заблокировано выполнение внешних скриптов через подстановку процесса."
 
 [[security.deny_patterns]]
 pattern = "git\\s+(push\\s+(--force|-f)|reset\\s+--hard|clean\\s+-[a-zA-Z]*f)"
 reason = "Заблокирована деструктивная Git-операция."
+
+[[security.deny_patterns]]
+pattern = "git\\s+(restore\\b|checkout\\s+--(\\s|$)|branch\\s+-D\\b|rebase\\b|filter-branch\\b)"
+reason = "Заблокирована деструктивная Git-операция."
+
+[[security.deny_patterns]]
+pattern = "git\\s+config\\s+.*(core\\.sshCommand|core\\.fsmonitor|core\\.pager|alias\\.)"
+reason = "Заблокирована небезопасная конфигурация Git."
+
+[[security.deny_patterns]]
+pattern = "awk\\b.*\\b(system\\s*\\(|getline\\b)"
+reason = "Заблокировано выполнение произвольных команд или чтение через awk."
+
+[[security.deny_patterns]]
+pattern = "python3?\\b.*\\b(rmtree|os\\.remove|os\\.unlink|os\\.system|subprocess|Popen)\\b"
+reason = "Заблокировано выполнение произвольных команд или удаление файлов через Python."
